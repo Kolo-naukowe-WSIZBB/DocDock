@@ -1,0 +1,12 @@
+# Secrets
+.env*
+!.env.example
+
+# IDE specific files
+.idea/
+*.DotSettings*
+.fleet/
+.vs/
+.vscode/
+*.suo
+*.user
