@@ -3,14 +3,17 @@
 The database uses SQLite. Stored file paths are derived from the file record:
 
 ```text
-y{year}/m{month}/{datatype}/{file_name}{extension}
+y{year}/m{month}/{file_type}/{file_name}{extension}
 ```
 
 The initial schema and default datatype-extension records are defined in
 [`migrations/001_initial_schema.sql`](./migrations/001_initial_schema.sql).
 Subsequent schema changes are applied in order; migration
-[`migrations/002_require_year_after_1970.sql`](./migrations/002_require_year_after_1970.sql)
-requires file years to be 1971 or later.
+[`migrations/002_checks.sql`](./migrations/002_checks.sql) applies the current
+file table constraints and stores the datatype in `file_type`.
+During that migration, `files_new` is a temporary replacement table used to
+copy existing rows into the updated schema; it is renamed to `files` before
+the migration completes.
 
 ## `files`
 
@@ -21,13 +24,12 @@ Stores metadata and the storage location components for each file.
 | `Id` | INTEGER | Primary key |
 | `file_name` | TEXT | Required |
 | `extension` | TEXT | Required; length greater than 1 |
-| `file_type` | TEXT | Optional |
 | `file_tags` | TEXT | Optional; must contain valid JSON |
 | `year` | INTEGER | Required; greater than 1970 and no greater than 9999 |
 | `month` | INTEGER | Required; between 1 and 12 |
-| `datatype` | TEXT | Required; one of `image`, `video`, `audio`, `text`, `3d`, or `other` |
+| `file_type` | TEXT | Required; one of `image`, `video`, `audio`, `text`, `3d`, or `other` |
 
-The combination of `year`, `month`, `datatype`, `file_name`, and `extension`
+The combination of `year`, `month`, `file_type`, `file_name`, and `extension`
 must be unique.
 
 ```sql
@@ -35,13 +37,12 @@ CREATE TABLE files (
     Id INTEGER PRIMARY KEY,
     file_name TEXT NOT NULL,
     extension TEXT NOT NULL CHECK (length(extension) > 1),
-    file_type TEXT,
     file_tags TEXT CHECK (json_valid(file_tags)),
     year INTEGER NOT NULL CHECK (year BETWEEN 1971 AND 9999),
     month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
-    datatype TEXT NOT NULL
-        CHECK (datatype IN ('image', 'video', 'audio', 'text', '3d', 'other')),
-    UNIQUE (year, month, datatype, file_name, extension)
+    file_type TEXT NOT NULL
+        CHECK (file_type IN ('image', 'video', 'audio', 'text', '3d', 'other')),
+    UNIQUE (year, month, file_type, file_name, extension)
 );
 ```
 
