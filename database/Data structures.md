@@ -27,7 +27,7 @@ Stores metadata and the storage location components for each file.
 | `file_tags` | TEXT | Optional; must contain valid JSON |
 | `year` | INTEGER | Required; greater than 1970 and no greater than 9999 |
 | `month` | INTEGER | Required; between 1 and 12 |
-| `file_type` | TEXT | Required; one of `image`, `video`, `audio`, `text`, `3d`, or `other` |
+| `file_type` | TEXT | Required; one of `image`, `video`, `audio`, `document`, `spreadsheet`, `script`, `3d`, or `other` |
 
 The combination of `year`, `month`, `file_type`, `file_name`, and `extension`
 must be unique.
@@ -41,7 +41,7 @@ CREATE TABLE files (
     year INTEGER NOT NULL CHECK (year BETWEEN 1971 AND 9999),
     month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
     file_type TEXT NOT NULL
-        CHECK (file_type IN ('image', 'video', 'audio', 'text', '3d', 'other')),
+        CHECK (file_type IN ('image', 'video', 'audio', 'document', 'spreadsheet', 'script', '3d', 'other')),
     UNIQUE (year, month, file_type, file_name, extension)
 );
 ```
@@ -67,9 +67,17 @@ CREATE TABLE tags (
 );
 ```
 
-The default datatype tags are `image`, `video`, `audio`, `text`, `3d`, and
-`other`. Default tags should not be deletable or changeable to user-created
-tags.
+The default datatype tags are `image`, `video`, `audio`, `document`,
+`spreadsheet`, `script`, `3d`, and `other`. Default tags should not be
+deletable or changeable to user-created tags.
+
+### Common document, spreadsheet, and script formats
+
+| Datatype | Extensions |
+| --- | --- |
+| `document` | `.txt`, `.md`, `.pdf`, `.doc`, `.docx`, `.docm`, `.odt`, `.ott`, `.rtf`, `.epub`, `.tex`, `.html` |
+| `spreadsheet` | `.ods`, `.ots`, `.fods`, `.xls`, `.xlsx`, `.xlsm`, `.xlsb`, `.xlt`, `.xltx`, `.xltm`, `.csv`, `.tsv`, `.numbers` |
+| `script` | `.py`, `.js`, `.mjs`, `.cjs`, `.ts`, `.jsx`, `.tsx`, `.sh`, `.bash`, `.zsh`, `.fish`, `.ps1`, `.bat`, `.cmd`, `.vbs`, `.wsf`, `.rb`, `.php`, `.pl`, `.lua`, `.r`, `.sql` |
 
 ## `filetypes`
 

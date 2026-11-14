@@ -9,7 +9,7 @@ CREATE TABLE files_new (
     file_tags TEXT CHECK (file_tags IS NULL OR json_valid(file_tags)),
     year INTEGER NOT NULL CHECK (year BETWEEN 1971 AND 9999),
     month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
-    file_type TEXT NOT NULL CHECK (file_type IN ('image', 'video', 'audio', 'text', '3d', 'other')),
+    file_type TEXT NOT NULL CHECK (file_type IN ('image', 'video', 'audio', 'document', 'spreadsheet', 'script', '3d', 'other')),
     UNIQUE (year, month, file_type, file_name, extension)
 );
 
