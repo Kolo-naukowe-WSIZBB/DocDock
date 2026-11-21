@@ -16,6 +16,6 @@
         </PackageReference>
     </ItemGroup>
     <ItemGroup>
-        <None Include="../migrations/*.sql" Link="migrations/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+        <None Include="../../database/migrations/*.sql" Link="migrations/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 </Project>

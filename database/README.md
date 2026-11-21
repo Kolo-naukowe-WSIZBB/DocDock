@@ -19,7 +19,7 @@ be applied only once.
 Run the C# database migration and constraint tests with the .NET 8 SDK:
 
 ```sh
-dotnet test database/tests/Database.Tests.csproj
+dotnet test tests/database/Database.Tests.csproj
 ```
 
 Tests use temporary in-memory SQLite databases; no application database is modified.
