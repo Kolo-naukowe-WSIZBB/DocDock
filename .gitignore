@@ -10,3 +10,7 @@
 .vscode/
 *.suo
 *.user
+
+# Local database
+storage/*.sqlite
+storage/*.sqlite-*

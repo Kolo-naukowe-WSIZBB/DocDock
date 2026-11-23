@@ -11,7 +11,6 @@ public sealed class MigrationTests : IDisposable
     {
         _connection = OpenDatabase();
         ApplyMigration(_connection, "001_initial_schema.sql");
-        ApplyMigration(_connection, "002_checks.sql");
     }
 
     public void Dispose() => _connection.Dispose();
@@ -38,11 +37,13 @@ public sealed class MigrationTests : IDisposable
         var mappings = new HashSet<(string Tag, string Extension)>();
         while (mappingsReader.Read())
             mappings.Add((mappingsReader.GetString(0), mappingsReader.GetString(1)));
-        Assert.Contains(("image", ".png"), mappings);
-        Assert.Contains(("document", ".pdf"), mappings);
-        Assert.Contains(("spreadsheet", ".csv"), mappings);
-        Assert.Contains(("script", ".py"), mappings);
-        Assert.Contains(("3d", ".obj"), mappings);
+        Assert.Contains(("image", "png"), mappings);
+        Assert.Contains(("document", "pdf"), mappings);
+        Assert.Contains(("spreadsheet", "csv"), mappings);
+        Assert.Contains(("script", "py"), mappings);
+        Assert.Contains(("script", "r"), mappings);
+        Assert.Contains(("3d", "obj"), mappings);
+        Assert.All(mappings, mapping => Assert.DoesNotContain(".", mapping.Extension));
 
         using var versionsCommand = _connection.CreateCommand();
         versionsCommand.CommandText = "SELECT version FROM schema_migrations ORDER BY version";
@@ -50,7 +51,7 @@ public sealed class MigrationTests : IDisposable
         var versions = new List<string>();
         while (versionsReader.Read())
             versions.Add(versionsReader.GetString(0));
-        Assert.Equal(new[] { "001_initial_schema", "002_checks" }, versions);
+        Assert.Equal(new[] { "001_initial_schema" }, versions);
     }
 
     [Fact]
@@ -58,44 +59,31 @@ public sealed class MigrationTests : IDisposable
     {
         const string query = "SELECT (SELECT COUNT(*) FROM tags), (SELECT COUNT(*) FROM filetypes)";
         var before = GetCounts(_connection, query);
+        using var tagIdCommand = _connection.CreateCommand();
+        tagIdCommand.CommandText = "SELECT Id FROM tags WHERE tag_name = 'image'";
+        var imageId = tagIdCommand.ExecuteScalar();
         ApplyMigration(_connection, "001_initial_schema.sql");
         Assert.Equal(before, GetCounts(_connection, query));
+        Assert.Equal(imageId, tagIdCommand.ExecuteScalar());
     }
 
     [Fact]
-    public void SecondMigrationPreservesExistingFileRecords()
+    public void ForeignKeysAreEnforcedOnAFreshConnection()
     {
-        using var connection = OpenDatabase();
-        ApplyMigration(connection, "001_initial_schema.sql");
-        Execute(connection, """
-            INSERT INTO files (file_name, extension, file_tags, year, month, datatype)
-            VALUES ('report', '.pdf', '["work"]', 2025, 6, 'document')
-            """);
-        ApplyMigration(connection, "002_checks.sql");
-
-        using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT file_name, extension, file_tags, year, month, file_type FROM files
-            """;
-        using var reader = command.ExecuteReader();
-        Assert.True(reader.Read());
-        Assert.Equal("report", reader.GetString(0));
-        Assert.Equal(".pdf", reader.GetString(1));
-        Assert.Equal("[\"work\"]", reader.GetString(2));
-        Assert.Equal(2025, reader.GetInt32(3));
-        Assert.Equal(6, reader.GetInt32(4));
-        Assert.Equal("document", reader.GetString(5));
-        Assert.False(reader.Read());
+        using var connection = new SqliteConnection(_connection.ConnectionString);
+        connection.Open();
+        AssertConstraint(() => Execute(
+            connection, "INSERT INTO filetypes (tag_id, extension) VALUES (99999, 'custom')"));
     }
 
     [Theory]
-    [InlineData(".", null, 2025, 1, "document")]
-    [InlineData(".pdf", "not-json", 2025, 1, "document")]
-    [InlineData(".pdf", null, 1970, 1, "document")]
-    [InlineData(".pdf", null, 10000, 1, "document")]
-    [InlineData(".pdf", null, 2025, 0, "document")]
-    [InlineData(".pdf", null, 2025, 13, "document")]
-    [InlineData(".pdf", null, 2025, 1, "unknown")]
+    [InlineData("", null, 2025, 1, "document")]
+    [InlineData("pdf", "not-json", 2025, 1, "document")]
+    [InlineData("pdf", null, 1970, 1, "document")]
+    [InlineData("pdf", null, 10000, 1, "document")]
+    [InlineData("pdf", null, 2025, 0, "document")]
+    [InlineData("pdf", null, 2025, 13, "document")]
+    [InlineData("pdf", null, 2025, 1, "unknown")]
     public void FileConstraintsRejectInvalidValues(
         string extension, string? tags, int year, int month, string fileType)
     {
@@ -105,8 +93,74 @@ public sealed class MigrationTests : IDisposable
     [Fact]
     public void FileConstraintsRejectDuplicateStoragePaths()
     {
-        InsertFile(_connection, ".pdf", "[\"work\"]", 2025, 1, "document");
-        AssertConstraint(() => InsertFile(_connection, ".pdf", null, 2025, 1, "document"));
+        InsertFile(_connection, "pdf", "[\"work\"]", 2025, 1, "document");
+        AssertConstraint(() => InsertFile(_connection, "pdf", null, 2025, 1, "document"));
+    }
+
+    [Fact]
+    public void FilesAcceptSingleCharacterExtensions()
+    {
+        InsertFile(_connection, "r", null, 2025, 1, "script");
+    }
+
+    [Fact]
+    public void FileAndFiletypeExtensionsAreCaseInsensitive()
+    {
+        InsertFile(_connection, "pdf", null, 2025, 1, "document");
+        AssertConstraint(() => Execute(_connection, """
+            INSERT INTO files (file_name, extension, year, month, file_type)
+            VALUES ('REPORT', 'pdf', 2025, 1, 'document')
+            """));
+        AssertConstraint(() => Execute(_connection, """
+            INSERT INTO files (file_name, extension, year, month, file_type)
+            VALUES ('report', 'PDF', 2025, 1, 'document')
+            """));
+        AssertConstraint(() => Execute(_connection, """
+            INSERT INTO filetypes (tag_id, extension)
+            SELECT Id, 'PDF' FROM tags WHERE tag_name = 'document'
+            """));
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM filetypes WHERE extension = 'PDF'";
+        Assert.Equal(1L, command.ExecuteScalar());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("../report")]
+    [InlineData("..\\report")]
+    [InlineData("report/child")]
+    [InlineData("report\\child")]
+    [InlineData("report..pdf")]
+    [InlineData("report\0hidden")]
+    public void FileNamesCannotEscapeTheStorageDirectory(string name)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO files (file_name, extension, year, month, file_type)
+            VALUES ($name, 'pdf', 2025, 1, 'document')
+            """;
+        command.Parameters.AddWithValue("$name", name);
+        AssertConstraint(() => command.ExecuteNonQuery());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(".pdf")]
+    [InlineData("tar.gz")]
+    [InlineData("../escape")]
+    [InlineData("pdf\\escape")]
+    [InlineData("pdf/escape")]
+    [InlineData("pdf\0hidden")]
+    public void ExtensionsCannotEscapeTheStorageDirectory(string extension)
+    {
+        AssertConstraint(() => InsertFile(_connection, extension, null, 2025, 1, "document"));
+        using var command = _connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO filetypes (tag_id, extension)
+            SELECT Id, $extension FROM tags WHERE tag_name = 'document'
+            """;
+        command.Parameters.AddWithValue("$extension", extension);
+        AssertConstraint(() => command.ExecuteNonQuery());
     }
 
     [Fact]
@@ -117,19 +171,41 @@ public sealed class MigrationTests : IDisposable
     }
 
     [Fact]
+    public void DefaultTagsCannotBeRenamedOrReplaced()
+    {
+        Execute(_connection, "PRAGMA foreign_keys = OFF");
+        AssertTrigger(() => Execute(_connection, "UPDATE tags SET tag_name = 'pictures' WHERE tag_name = 'image'"));
+        AssertTrigger(() => Execute(_connection, "UPDATE tags SET Id = 99999 WHERE tag_name = 'image'"));
+        AssertTrigger(() => Execute(_connection, "INSERT OR REPLACE INTO tags (tag_name, is_default) VALUES ('image', 0)"));
+        AssertTrigger(() => Execute(_connection, "INSERT OR REPLACE INTO tags (tag_name, is_default) VALUES ('image', 1)"));
+        AssertTrigger(() => Execute(_connection, """
+            INSERT OR REPLACE INTO tags (Id, tag_name)
+            SELECT Id, 'pictures' FROM tags WHERE tag_name = 'image'
+            """));
+        Execute(_connection, "INSERT INTO tags (tag_name) VALUES ('custom')");
+        AssertTrigger(() => Execute(_connection, "UPDATE OR REPLACE tags SET tag_name = 'image' WHERE tag_name = 'custom'"));
+    }
+
+    [Fact]
     public void FiletypesRequireAnExistingTagAndUniqueExtension()
     {
         AssertConstraint(() => Execute(
-            _connection, "INSERT INTO filetypes (tag_id, extension) VALUES (99999, '.custom')"));
+            _connection, "INSERT INTO filetypes (tag_id, extension) VALUES (99999, 'custom')"));
         AssertConstraint(() => Execute(_connection, """
             INSERT INTO filetypes (tag_id, extension)
-            SELECT Id, '.pdf' FROM tags WHERE tag_name = 'document'
+            SELECT Id, 'pdf' FROM tags WHERE tag_name = 'document'
             """));
     }
 
     private static SqliteConnection OpenDatabase()
     {
-        var connection = new SqliteConnection("Data Source=:memory:");
+        var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = Guid.NewGuid().ToString(),
+            Mode = SqliteOpenMode.Memory,
+            Cache = SqliteCacheMode.Shared,
+            ForeignKeys = true
+        }.ToString());
         connection.Open();
         return connection;
     }
@@ -176,5 +252,11 @@ public sealed class MigrationTests : IDisposable
     {
         var exception = Assert.Throws<SqliteException>(action);
         Assert.Equal(19, exception.SqliteErrorCode);
+    }
+
+    private static void AssertTrigger(Action action)
+    {
+        var exception = Assert.Throws<SqliteException>(action);
+        Assert.Equal(1811, exception.SqliteExtendedErrorCode);
     }
 }
